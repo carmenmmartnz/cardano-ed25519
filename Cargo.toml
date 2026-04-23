@@ -1,0 +1,12 @@
+[package]
+name = "cardano-ed25519"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+sha2 = "0.10"
+hmac = "0.12"
+pbkdf2 = "0.12"
+bip39 = "2"
+curve25519-dalek = "4"
+hex = "0.4"

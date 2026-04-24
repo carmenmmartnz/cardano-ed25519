@@ -3,7 +3,7 @@ mod keys;
 mod mnemonic;
 mod path;
 
-use derivation::public_key_from_private;
+use derivation::{public_key_from_private, derive_child_from_path};
 use mnemonic::root_key_from_mnemonic;
 use path::DerivationPath;
 
@@ -19,5 +19,11 @@ fn main() {
     println!("Root public key:\n{pub_key}\n");
 
     let path = DerivationPath::parse("m/1852'/1815'/0'/0/0").unwrap();
-    println!("Path: {path}  (child derivation coming next)");
+    println!("Path: {path}\n");
+
+    let child_key = derive_child_from_path(&priv_key, &path);
+    println!("Child private key at {path}:\n{child_key}\n");
+
+    let child_pub_key = public_key_from_private(&child_key);
+    println!("Child public key at {path}:\n{child_pub_key}");
 }

@@ -1,3 +1,6 @@
+use hmac::{Hmac, Mac}; // Hash-based Message Authentication Code (HMAC)
+use sha2::Sha512; // Hash function
+use crate::path::DerivationPath;
 use crate::keys::{ExtendedPrivKey, ExtendedPubKey};
 use curve25519_dalek::constants::ED25519_BASEPOINT_POINT;
 use curve25519_dalek::scalar::Scalar;
@@ -13,4 +16,93 @@ pub fn public_key_from_private(priv_key: &ExtendedPrivKey) -> ExtendedPubKey {
         key:        point.compress().to_bytes(),
         chain_code: priv_key.chain_code,
     }
+}
+
+pub fn derive_child_from_path(root: &ExtendedPrivKey, path: &DerivationPath) -> ExtendedPrivKey {
+    let mut current = root.clone();
+    for &index in &path.indices {
+        current = derive_child(&current, index);
+    }
+    current
+}
+
+fn derive_child(parent: &ExtendedPrivKey, index: u32) -> ExtendedPrivKey {
+    let i_le = index.to_le_bytes();
+
+    let (z_input, c_input) = if DerivationPath::is_hardened(index) {
+        let mut z = vec![0x00u8];
+        z.extend_from_slice(&parent.kl);
+        z.extend_from_slice(&parent.kr);
+        z.extend_from_slice(&i_le);
+
+        let mut c = vec![0x01u8];
+        c.extend_from_slice(&parent.kl);
+        c.extend_from_slice(&parent.kr);
+        c.extend_from_slice(&i_le);
+
+        (z, c)
+    } else {
+        let pub_key = public_key_from_private(parent).key;
+        let mut z = vec![0x02u8];
+        z.extend_from_slice(&pub_key);
+        z.extend_from_slice(&i_le);
+
+        let mut c = vec![0x03u8];
+        c.extend_from_slice(&pub_key);
+        c.extend_from_slice(&i_le);
+
+        (z, c)
+    };
+
+    let z_full = hmac_sha512(&parent.chain_code, &z_input);
+    let zl: [u8; 28] = z_full[0..28].try_into().unwrap();
+    let zr: [u8; 32] = z_full[32..64].try_into().unwrap();
+
+    let kl = mul8_add(&zl, &parent.kl);
+    let kr = add_le_mod256(&zr, &parent.kr);
+
+    let c_full = hmac_sha512(&parent.chain_code, &c_input);
+    let chain_code: [u8; 32] = c_full[32..64].try_into().unwrap();
+
+    ExtendedPrivKey { kl, kr, chain_code }
+}
+
+
+/*
+HMACSHA512 is a type of keyed hash algorithm that is constructed from the SHA-512 hash
+function and used as a Hash-based Message Authentication Code (HMAC).
+The HMAC process mixes a secret key with the message data and hashes the result.
+The hash value is mixed with the secret key again, and then hashed a second time.
+The output hash is 512 bits in length.
+*/
+fn hmac_sha512(key: &[u8], data: &[u8]) -> [u8; 64] {
+    let mut mac = Hmac::<Sha512>::new_from_slice(key).unwrap();
+    mac.update(data);
+    mac.finalize().into_bytes().into()
+}
+
+// Compute 8*ZL + kL in little-endian 256-bit arithmetic.
+// ZL is 28 bytes (224-bit), so 8*ZL fits in 227 bits — no overflow past 256 bits.
+fn mul8_add(zl: &[u8; 28], kl: &[u8; 32]) -> [u8; 32] {
+    let mut result = [0u8; 32];
+    let mut carry = 0u32;
+    for i in 0..32 {
+        let zl_val = if i < 28 { zl[i] as u32 } else { 0u32 };
+        let val = zl_val * 8 + kl[i] as u32 + carry;
+        result[i] = val as u8;
+        carry = val >> 8;
+    }
+    result
+}
+
+// Add two 32-byte little-endian integers mod 2^256.
+fn add_le_mod256(a: &[u8; 32], b: &[u8; 32]) -> [u8; 32] {
+    let mut result = [0u8; 32];
+    let mut carry = 0u32;
+    for i in 0..32 {
+        let val = a[i] as u32 + b[i] as u32 + carry;
+        result[i] = val as u8;
+        carry = val >> 8;
+    }
+    result
 }

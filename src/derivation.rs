@@ -1,9 +1,9 @@
-use hmac::{Hmac, Mac}; // Hash-based Message Authentication Code (HMAC)
-use sha2::Sha512; // Hash function
-use crate::path::DerivationPath;
 use crate::keys::{ExtendedPrivKey, ExtendedPubKey};
+use crate::path::DerivationPath;
 use curve25519_dalek::constants::ED25519_BASEPOINT_POINT;
 use curve25519_dalek::scalar::Scalar;
+use hmac::{Hmac, Mac}; // Hash-based Message Authentication Code (HMAC)
+use sha2::Sha512; // Hash function
 
 /// Compute the compressed public key A = [kL]B.
 ///
@@ -11,9 +11,9 @@ use curve25519_dalek::scalar::Scalar;
 /// before scalar multiplication. [kL]B = [kL mod n]B is mathematically identical.
 pub fn public_key_from_private(priv_key: &ExtendedPrivKey) -> ExtendedPubKey {
     let scalar = Scalar::from_bytes_mod_order(priv_key.kl);
-    let point  = scalar * ED25519_BASEPOINT_POINT;
+    let point = scalar * ED25519_BASEPOINT_POINT;
     ExtendedPubKey {
-        key:        point.compress().to_bytes(),
+        key: point.compress().to_bytes(),
         chain_code: priv_key.chain_code,
     }
 }
@@ -54,7 +54,7 @@ fn derive_child(parent: &ExtendedPrivKey, index: u32) -> ExtendedPrivKey {
         (z, c)
     };
 
-    let z_full = hmac_sha512(&parent.chain_code, &z_input);
+    let z_full: [u8; 64] = hmac_sha512(&parent.chain_code, &z_input);
     let zl: [u8; 28] = z_full[0..28].try_into().unwrap();
     let zr: [u8; 32] = z_full[32..64].try_into().unwrap();
 
@@ -67,13 +67,31 @@ fn derive_child(parent: &ExtendedPrivKey, index: u32) -> ExtendedPrivKey {
     ExtendedPrivKey { kl, kr, chain_code }
 }
 
-
 /*
-HMACSHA512 is a type of keyed hash algorithm that is constructed from the SHA-512 hash
-function and used as a Hash-based Message Authentication Code (HMAC).
-The HMAC process mixes a secret key with the message data and hashes the result.
-The hash value is mixed with the secret key again, and then hashed a second time.
-The output hash is 512 bits in length.
+
+    Hash-based Message Authentication Code.   
+    It's a way to produce a fixed-size output from some input,
+    using a secret key, built on top of a hash function (like
+    SHA-512).
+    
+    The formula:                                              
+    HMAC(key, message) = H((key ⊕ opad) || H((key ⊕ ipad) ||
+    message))                                                 
+    Two nested hash calls, each using the key XORed with a    
+    different padding constant (ipad, opad).
+                                                                
+    In plain terms:
+    - Takes a key and a message
+    - Produces a fixed-size output (64 bytes for SHA-512)
+    - The same inputs always produce the same output
+    (deterministic)           
+    - Without the key, you cannot reproduce or predict the    
+    output
+
+    Why HMAC and not just a hash?                           
+                                    
+    A plain hash like SHA512(key || message) is vulnerable to 
+    length-extension attacks.
 */
 fn hmac_sha512(key: &[u8], data: &[u8]) -> [u8; 64] {
     let mut mac = Hmac::<Sha512>::new_from_slice(key).unwrap();

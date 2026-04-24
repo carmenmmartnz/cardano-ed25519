@@ -2,13 +2,14 @@ mod derivation;
 mod keys;
 mod mnemonic;
 mod path;
+mod signature;
 
 use derivation::{public_key_from_private, derive_child_from_path};
 use mnemonic::root_key_from_mnemonic;
 use path::DerivationPath;
+use signature::{sign, verify};
 
 fn main() {
-    // Standard BIP39 test mnemonic (12 words, known-valid checksum)
     let phrase = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
     let passphrase = "";
 
@@ -25,5 +26,15 @@ fn main() {
     println!("Child private key at {path}:\n{child_key}\n");
 
     let child_pub_key = public_key_from_private(&child_key);
-    println!("Child public key at {path}:\n{child_pub_key}");
+    println!("Child public key at {path}:\n{child_pub_key}\n");
+
+    let message = b"Hello, Cardano!";
+    let sig = sign(&child_key, message);
+    println!("Signature:\n{sig}\n");
+
+    let valid = verify(&sig, message, &child_pub_key);
+    println!("Signature valid: {valid}\n");
+
+    let tampered = verify(&sig, b"tampered message", &child_pub_key);
+    println!("Tampered message valid: {tampered}");
 }

@@ -1,13 +1,7 @@
-mod derivation;
-mod keys;
-mod mnemonic;
-mod path;
-mod signature;
-
-use derivation::{public_key_from_private, derive_child_from_path};
-use mnemonic::root_key_from_mnemonic;
-use path::DerivationPath;
-use signature::{sign, verify};
+use cardano_ed25519::derivation::{derive_child_from_path, public_key_from_private};
+use cardano_ed25519::mnemonic::root_key_from_mnemonic;
+use cardano_ed25519::path::DerivationPath;
+use cardano_ed25519::signature::{sign, verify};
 
 fn main() {
     let phrase = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";

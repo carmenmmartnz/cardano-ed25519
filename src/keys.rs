@@ -1,13 +1,13 @@
 #[derive(Clone)]
 pub struct ExtendedPrivKey {
-    pub kl: [u8; 32],         // signing scalar (clamped)
-    pub kr: [u8; 32],         // nonce material for signing
+    pub kl: [u8; 32], // signing scalar (clamped)
+    pub kr: [u8; 32], // nonce material for signing
     pub chain_code: [u8; 32],
 }
 
 #[derive(Clone)]
 pub struct ExtendedPubKey {
-    pub key: [u8; 32],        // compressed Edwards point
+    pub key: [u8; 32], // compressed Edwards point
     pub chain_code: [u8; 32],
 }
 

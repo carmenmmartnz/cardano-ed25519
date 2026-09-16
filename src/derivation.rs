@@ -26,7 +26,10 @@ pub fn derive_child_from_path(root: &ExtendedPrivKey, path: &DerivationPath) -> 
     current
 }
 
-fn derive_child(parent: &ExtendedPrivKey, index: u32) -> ExtendedPrivKey {
+/// Derive a single child. Public so callers can walk a path one level at a
+/// time and inspect every intermediate node (the browser explorer does this
+/// to render the derivation tree).
+pub fn derive_child(parent: &ExtendedPrivKey, index: u32) -> ExtendedPrivKey {
     let i_le = index.to_le_bytes();
 
     let (z_input, c_input) = if DerivationPath::is_hardened(index) {
@@ -69,28 +72,28 @@ fn derive_child(parent: &ExtendedPrivKey, index: u32) -> ExtendedPrivKey {
 
 /*
 
-    Hash-based Message Authentication Code.   
+    Hash-based Message Authentication Code.
     It's a way to produce a fixed-size output from some input,
     using a secret key, built on top of a hash function (like
     SHA-512).
-    
-    The formula:                                              
+
+    The formula:
     HMAC(key, message) = H((key ⊕ opad) || H((key ⊕ ipad) ||
-    message))                                                 
-    Two nested hash calls, each using the key XORed with a    
+    message))
+    Two nested hash calls, each using the key XORed with a
     different padding constant (ipad, opad).
-                                                                
+
     In plain terms:
     - Takes a key and a message
     - Produces a fixed-size output (64 bytes for SHA-512)
     - The same inputs always produce the same output
-    (deterministic)           
-    - Without the key, you cannot reproduce or predict the    
+    (deterministic)
+    - Without the key, you cannot reproduce or predict the
     output
 
-    Why HMAC and not just a hash?                           
-                                    
-    A plain hash like SHA512(key || message) is vulnerable to 
+    Why HMAC and not just a hash?
+
+    A plain hash like SHA512(key || message) is vulnerable to
     length-extension attacks.
 */
 fn hmac_sha512(key: &[u8], data: &[u8]) -> [u8; 64] {
@@ -123,4 +126,97 @@ fn add_le_mod256(a: &[u8; 32], b: &[u8; 32]) -> [u8; 32] {
         carry = val >> 8;
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mnemonic::root_key_from_mnemonic;
+    use crate::path::HARDENED_OFFSET;
+    use curve25519_dalek::edwards::CompressedEdwardsY;
+
+    const PHRASE: &str = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+
+    fn root() -> ExtendedPrivKey {
+        root_key_from_mnemonic(PHRASE, "").unwrap()
+    }
+
+    /// kL has to stay a clamped scalar at every level, which is the whole
+    /// reason Icarus masks one bit more than plain Ed25519 does.
+    fn assert_clamped(kl: &[u8; 32]) {
+        assert_eq!(kl[0] & 0b0000_0111, 0, "low three bits must be clear");
+        assert_eq!(kl[31] & 0b1000_0000, 0, "bit 255 must be clear");
+        assert_eq!(kl[31] & 0b0100_0000, 0b0100_0000, "bit 254 must be set");
+    }
+
+    #[test]
+    fn clamping_survives_the_whole_path() {
+        let path = DerivationPath::parse("m/1852'/1815'/0'/0/0").unwrap();
+        let mut current = root();
+        assert_clamped(&current.kl);
+        for &index in &path.indices {
+            current = derive_child(&current, index);
+            assert_clamped(&current.kl);
+        }
+    }
+
+    /// The point of soft derivation: a child public key can be computed from
+    /// the parent public key alone, as A' = A + [8·ZL]B. If this holds, the
+    /// private derivation above agrees with public (watch-only) derivation.
+    #[test]
+    fn soft_derivation_matches_public_only_derivation() {
+        let parent = root();
+        let index = 0u32;
+        let child = derive_child(&parent, index);
+
+        let a_parent = public_key_from_private(&parent).key;
+        let mut z_input = vec![0x02u8];
+        z_input.extend_from_slice(&a_parent);
+        z_input.extend_from_slice(&index.to_le_bytes());
+        let z = hmac_sha512(&parent.chain_code, &z_input);
+
+        let mut zl = [0u8; 32];
+        zl[..28].copy_from_slice(&z[0..28]);
+        let eight_zl = Scalar::from(8u8) * Scalar::from_bytes_mod_order(zl);
+
+        let a_child =
+            CompressedEdwardsY(a_parent).decompress().unwrap() + eight_zl * ED25519_BASEPOINT_POINT;
+
+        assert_eq!(
+            a_child.compress().to_bytes(),
+            public_key_from_private(&child).key
+        );
+    }
+
+    /// Hardened derivation feeds the private key into the HMAC, soft
+    /// derivation feeds the public key, so index 0 and 0' must diverge.
+    #[test]
+    fn hardened_and_soft_children_differ() {
+        let parent = root();
+        let soft = derive_child(&parent, 0);
+        let hardened = derive_child(&parent, HARDENED_OFFSET);
+        assert_ne!(soft.kl, hardened.kl);
+        assert_ne!(soft.chain_code, hardened.chain_code);
+    }
+
+    #[test]
+    fn derivation_is_deterministic() {
+        let path = DerivationPath::parse("m/1852'/1815'/0'/0/0").unwrap();
+        let first = derive_child_from_path(&root(), &path);
+        let second = derive_child_from_path(&root(), &path);
+        assert_eq!(first.kl, second.kl);
+        assert_eq!(first.chain_code, second.chain_code);
+    }
+
+    #[test]
+    fn each_level_of_the_path_gives_a_different_key() {
+        let path = DerivationPath::parse("m/1852'/1815'/0'/0/0").unwrap();
+        let mut seen = vec![root().kl];
+        let mut current = root();
+        for &index in &path.indices {
+            current = derive_child(&current, index);
+            assert!(!seen.contains(&current.kl));
+            seen.push(current.kl);
+        }
+    }
 }
